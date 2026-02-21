@@ -14,9 +14,9 @@ helpers({
 
 function script({ positional, named }) {
   if(positional.length < 3) throw new Error("Two positional args required");
-  const jsonf = path.resolve(positional[0]);
-  const tplf = path.resolve(positional[1]);
-  const outf = path.resolve(positional[2]);
+  const jsonf = path.resolve(process.cwd(), positional[0]);
+  const tplf = path.resolve(process.cwd(), positional[1]);
+  const outf = path.resolve(process.cwd(), positional[2]);
   const json = fs.readFileSync(jsonf, 'utf8');
   const tpl = fs.readFileSync(tplf, 'utf8');
   const template = Handlebars.compile(tpl);
