@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+
+# Script to compress folders into 2GB ZIP chunks
+# Usage: ./twogb.sh [input_folder] [output_folder]
+# If no input folder specified, uses current directory
+# If no output folder specified, uses same as input folder
+
+# Maximum chunk size in bytes (2GB)
+MAX_CHUNK_SIZE=$((2048 * 1024 * 1024))
+
+# Generate timestamp string
+DTSTR=$(date -u +"%Y%m%d%H%M%S")
+
+# Set input folder (default to current directory if not provided)
+if [ $# -ge 1 ] && [ -n "$1" ]; then
+    input_folder="$1"
+else
+    input_folder="$(pwd)"
+fi
+
+# Set output folder (default to input folder if not provided)
+if [ $# -ge 2 ] && [ -n "$2" ]; then
+    output_folder="$2"
+else
+    output_folder="$input_folder"
+fi
+
+# Check if input folder exists
+if [ ! -d "$input_folder" ]; then
+    echo "Error: Input folder '$input_folder' does not exist."
+    exit 1
+fi
+
+# Create output folder if it doesn't exist
+if [ ! -d "$output_folder" ]; then
+    mkdir -p "$output_folder"
+    echo "Created output folder: $output_folder"
+fi
+
+# Function to compress a single folder
+compress_folder() {
+    local folder_path="$1"
+    local base_input_path="$2"
+    local output_path="$3"
+    
+    local folder_name=$(basename "$folder_path")
+    echo "Processing folder: $folder_name"
+    
+    # Create temporary file list with sizes
+    local temp_file_list=$(mktemp)
+    
+    # Find all files and get their sizes
+    find "$folder_path" -type f -printf "%s %p\n" > "$temp_file_list"
+    
+    if [ ! -s "$temp_file_list" ]; then
+        echo "No files found in $folder_name, skipping..."
+        rm "$temp_file_list"
+        return
+    fi
+    
+    echo "Files to process:"
+    cat "$temp_file_list"
+    
+    # Split files into chunks based on size
+    local chunk_num=1
+    local current_size=0
+    local chunk_files=()
+    
+    while IFS=' ' read -r file_size file_path; do
+        # If adding this file exceeds chunk size and we have files in current chunk
+        if [ $((current_size + file_size)) -gt $MAX_CHUNK_SIZE ] && [ ${#chunk_files[@]} -gt 0 ]; then
+            # Create ZIP for current chunk
+            create_zip_chunk "$folder_name" "$chunk_num" "$output_path" "${chunk_files[@]}"
+            
+            # Start new chunk
+            chunk_num=$((chunk_num + 1))
+            chunk_files=("$file_path")
+            current_size=$file_size
+        else
+            # Add file to current chunk
+            chunk_files+=("$file_path")
+            current_size=$((current_size + file_size))
+        fi
+    done < "$temp_file_list"
+    
+    # Create ZIP for remaining files
+    if [ ${#chunk_files[@]} -gt 0 ]; then
+        create_zip_chunk "$folder_name" "$chunk_num" "$output_path" "${chunk_files[@]}"
+    fi
+    
+    # Clean up temporary file and remove original folder
+    rm "$temp_file_list"
+    rm -rf "$folder_path"
+    echo "Removed original folder: $folder_name"
+}
+
+# Function to create a ZIP chunk
+create_zip_chunk() {
+    local folder_name="$1"
+    local chunk_num="$2"
+    local output_path="$3"
+    shift 3
+    local files=("$@")
+    
+    local zip_name="${folder_name}-${DTSTR}$(printf "%02d" $chunk_num).zip"
+    local zip_path="$output_path/$zip_name"
+    
+    echo "Creating ZIP: $zip_name"
+    
+    # Create ZIP file
+    local temp_zip=$(mktemp -u).zip
+    
+    # Add files to ZIP
+    for file in "${files[@]}"; do
+        # Calculate relative path for ZIP entry
+        local relative_path="${file#$input_folder/}"
+        
+        # Add file to ZIP with relative path
+        zip -j0 "$temp_zip" "$file" >/dev/null 2>&1
+        
+        # Clear the original file content and remove it
+        > "$file"
+        rm "$file"
+    done
+    
+    # Move temp ZIP to final location
+    mv "$temp_zip" "$zip_path"
+    
+    # Show ZIP file size
+    local zip_size=$(stat -f%z "$zip_path" 2>/dev/null || stat -c%s "$zip_path" 2>/dev/null)
+    echo "ZIP size: $zip_size bytes"
+}
+
+# Main processing
+echo "Input folder: $input_folder"
+echo "Output folder: $output_folder"
+echo "Maximum chunk size: $MAX_CHUNK_SIZE bytes (2GB)"
+echo ""
+
+# Find all subdirectories in input folder
+folders=()
+while IFS= read -r -d '' dir; do
+    folders+=("$dir")
+done < <(find "$input_folder" -maxdepth 1 -type d -not -path "$input_folder" -print0)
+
+if [ ${#folders[@]} -eq 0 ]; then
+    echo "No subdirectories found in '$input_folder'"
+    exit 0
+fi
+
+echo "Found ${#folders[@]} folder(s) to compress"
+
+# Process each folder
+for folder in "${folders[@]}"; do
+    compress_folder "$folder" "$input_folder" "$output_folder"
+    echo ""
+done
+
+echo "Compression complete!"
