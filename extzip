@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+# Script to extract ZIP files from input folder to output folder
+# Usage: ./extzip.sh [input_folder] [output_folder]
+# If no input folder specified, uses current directory
+# If no output folder specified, uses same as input folder
+
+# Set input folder (default to current directory if not provided)
+if [ $# -ge 1 ] && [ -n "$1" ]; then
+    input_folder="$1"
+else
+    input_folder="$(pwd)"
+fi
+
+# Set output folder (default to input folder if not provided)
+if [ $# -ge 2 ] && [ -n "$2" ]; then
+    output_folder="$2"
+else
+    output_folder="$input_folder"
+fi
+
+# Check if input folder exists
+if [ ! -d "$input_folder" ]; then
+    echo "Error: Input folder '$input_folder' does not exist."
+    exit 1
+fi
+
+# Create output folder if it doesn't exist
+if [ ! -d "$output_folder" ]; then
+    mkdir -p "$output_folder"
+    echo "Created output folder: $output_folder"
+fi
+
+# Find and process ZIP files
+zip_files=()
+while IFS= read -r -d '' file; do
+    zip_files+=("$file")
+done < <(find "$input_folder" -maxdepth 1 -name "*.zip" -print0)
+
+if [ ${#zip_files[@]} -eq 0 ]; then
+    echo "No ZIP files found in '$input_folder'"
+    exit 0
+fi
+
+echo "Found ${#zip_files[@]} ZIP file(s) in '$input_folder'"
+echo "Extracting to '$output_folder'"
+
+# Extract each ZIP file
+for zip_file in "${zip_files[@]}"; do
+    echo "Processing: $(basename "$zip_file")"
+    
+    # Extract the ZIP file
+    if unzip -q "$zip_file" -d "$output_folder"; then
+        echo "Successfully extracted: $(basename "$zip_file")"
+        
+        # Remove the original ZIP file
+        if rm "$zip_file"; then
+            echo "Removed: $(basename "$zip_file")"
+        else
+            echo "Warning: Failed to remove $(basename "$zip_file")"
+        fi
+    else
+        echo "Error: Failed to extract $(basename "$zip_file")"
+    fi
+    echo ""
+done
+
+echo "Extraction complete!"
